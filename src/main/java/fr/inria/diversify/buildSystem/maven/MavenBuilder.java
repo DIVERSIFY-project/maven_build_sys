@@ -23,6 +23,19 @@ public class MavenBuilder extends AbstractBuilder {
 
     final static Logger logger = Logger.getLogger(MavenBuilder.class);
 
+    public boolean isVerbose() {
+        return verbose;
+    }
+
+    public void setVerbose(boolean verbose) {
+        this.verbose = verbose;
+    }
+
+    /**
+     * Verbose output
+     */
+    private boolean verbose;
+
     public MavenBuilder(String directory, String srcDir) throws IOException {
         super(directory, srcDir);
     }
@@ -60,7 +73,8 @@ public class MavenBuilder extends AbstractBuilder {
 
         ByteArrayOutputStream os = new ByteArrayOutputStream();
         PrintStream stream = new PrintStream(os);
-        PrintStreamHandler psh = new PrintStreamHandler(stream, true);
+        PrintStreamHandler psh = verbose ? new StdOutPrintStreamHandler(stream, true)
+                : new PrintStreamHandler(stream, true);
         invoker.setOutputHandler(psh);
         invoker.setErrorHandler(psh);
         try {

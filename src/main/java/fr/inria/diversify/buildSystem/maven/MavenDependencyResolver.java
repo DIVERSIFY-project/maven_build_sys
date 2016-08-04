@@ -17,9 +17,7 @@ import java.io.IOException;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLClassLoader;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Properties;
+import java.util.*;
 
 /**
  * User: Simon
@@ -30,27 +28,44 @@ public class MavenDependencyResolver {
 
     final static Logger logger = Logger.getLogger(MavenDependencyResolver.class);
 
-    public void DependencyResolver(String pomFile) throws Exception {
+    private boolean fullResolve = false;
+
+    public boolean isFullResolve() {
+        return fullResolve;
+    }
+
+    /**
+     * Indicates whether the path must be fully resolved or not. When the POM is fully resolved
+     * the dependencies of its dependencies will be also added to the class path recursively.
+     * @param fullResolve True to fully resolve the POM
+     */
+    public void setFullResolve(boolean fullResolve) {
+        this.fullResolve = fullResolve;
+    }
+
+
+    /**
+     * Adds to the class path all dependencies of a project and the project itself
+     * @param pomFile
+     * @throws Exception
+     */
+    public void resolveDependencies(String pomFile) throws Exception {
         MavenProject project = loadProject(new File(pomFile));
         resolveAllDependencies(project);
     }
 
-    public MavenProject loadProject(File pomFile) throws IOException, XmlPullParserException {
-        MavenProject ret = null;
+    private MavenProject loadProject(File pomFile) throws IOException, XmlPullParserException {
         MavenXpp3Reader mavenReader = new MavenXpp3Reader();
-
-        //Removed null and file exists protections that mask errors
-        FileReader reader = null;
-        reader = new FileReader(pomFile);
+        FileReader reader = new FileReader(pomFile);
         Model model = mavenReader.read(reader);
         model.setPomFile(pomFile);
-        ret = new MavenProject(model);
+        MavenProject ret = new MavenProject(model);
         reader.close();
-
         return ret;
     }
 
-    public void resolveAllDependencies(MavenProject project) throws MalformedURLException {
+
+    private void resolveAllDependencies(MavenProject project) throws MalformedURLException {
         MavenResolver resolver = new MavenResolver();
         resolver.setBasePath(System.getProperty("user.home") + File.separator + ".m2/repository");
 
@@ -60,24 +75,42 @@ public class MavenDependencyResolver {
         }
         urls.add("http://repo1.maven.org/maven2/");
 
-        List<URL> jarURL = new ArrayList<URL>();
+        List<URL> jarURL =  new ArrayList<>();
         Properties properties = project.getProperties();
         for (Dependency dependency : project.getDependencies()) {
-            String artifactId = "mvn:" + resolveName(dependency.getGroupId(), properties) +
-                    ":" + resolveName(dependency.getArtifactId(), properties) +
-                    ":" + resolveName(dependency.getVersion(), properties) +
-                    ":" + resolveName(dependency.getType(), properties);
-            //Log.debug("revolve artifact: {}", artifactId);
-            File cachedFile = resolver.resolve(artifactId, urls);
-            if ( cachedFile != null ) jarURL.add(cachedFile.toURI().toURL());
-            else logger.warn("Unable to find artifact: " + artifactId);
+            addArtifactToJar(resolver, dependency, properties, jarURL, urls);
         }
 
-        URLClassLoader child = new URLClassLoader(jarURL.toArray(new URL[jarURL.size()]), Thread.currentThread().getContextClassLoader());
+        try {
+            Dependency projectItself = new Dependency();
+            projectItself.setArtifactId(project.getArtifactId());
+            projectItself.setGroupId(project.getGroupId());
+            projectItself.setVersion(project.getVersion());
+            projectItself.setType("jar");
+            addArtifactToJar(resolver, projectItself, properties, jarURL, urls);
+        } catch ( Exception e ){
+            logger.warn("Unable to add the project's jar to the class path");
+        }
+
+
+        URLClassLoader child = new URLClassLoader(
+                jarURL.toArray(new URL[jarURL.size()]), Thread.currentThread().getContextClassLoader());
         Thread.currentThread().setContextClassLoader(child);
     }
 
-    protected String resolveName(String string, Properties properties) {
+    private void addArtifactToJar(MavenResolver resolver, Dependency dependency,
+                                  Properties properties, List<URL> jarURL, List<String> urls) throws MalformedURLException {
+        String artifactId = "mvn:" + resolveName(dependency.getGroupId(), properties) +
+                ":" + resolveName(dependency.getArtifactId(), properties) +
+                ":" + resolveName(dependency.getVersion(), properties) +
+                ":" + resolveName(dependency.getType(), properties);
+        File cachedFile = resolver.resolve(artifactId, urls);
+        if (cachedFile != null) jarURL.add(cachedFile.toURI().toURL());
+        else logger.warn("Unable to find artifact: " + artifactId);
+    }
+
+
+    private String resolveName(String string, Properties properties) {
         char[] chars = string.toCharArray();
         int replaceBegin = -1;
         String id = "";
