@@ -31,6 +31,8 @@ public class MavenBuilder extends AbstractBuilder {
         this.verbose = verbose;
     }
 
+    private String mavenHomeFolder;
+
     /**
      * Verbose output
      */
@@ -38,6 +40,7 @@ public class MavenBuilder extends AbstractBuilder {
 
     public MavenBuilder(String directory, String srcDir) throws IOException {
         super(directory, srcDir);
+        mavenHomeFolder = null;
     }
 
     protected void runPrivate() {
@@ -57,16 +60,16 @@ public class MavenBuilder extends AbstractBuilder {
 
         MavenInvoker invoker = new MavenInvoker();
         //freebsd
-        File mvnHome = new File("/usr/local/share/java/maven3");
+        File mvnHome = new File(System.getenv("M2_HOME"));
+        //win
         if (!mvnHome.exists())
-            //ubuntu
+            mvnHome = new File("/usr/local/share/java/maven3");
+        //ubuntu
+        if (!mvnHome.exists())
             mvnHome = new File("/usr/share/maven");
+        //osx
         if (!mvnHome.exists())
-            //osx
             mvnHome = new File("/usr/local/Cellar/maven/3.1.1/libexec/");
-        if (!mvnHome.exists())
-            //win
-            mvnHome = new File(System.getenv("M2_HOME"));
 
         invoker.setMavenHome(mvnHome);
         invoker.setTimeOut(timeOut);
@@ -145,5 +148,13 @@ public class MavenBuilder extends AbstractBuilder {
         FileUtils.forceMkdir(failFastDir);
         FileUtils.copyFileToDirectory(new File("src/main/java/fr/inria/diversify/transformation/builder/FailFastListener.java"), failFastDir);
         */
+    }
+
+    public String getMavenHomeFolder() {
+        return mavenHomeFolder;
+    }
+
+    public void setMavenHomeFolder(String mavenHomeFolder) {
+        this.mavenHomeFolder = mavenHomeFolder;
     }
 }

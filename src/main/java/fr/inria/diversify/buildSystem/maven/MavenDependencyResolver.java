@@ -2,6 +2,7 @@ package fr.inria.diversify.buildSystem.maven;
 
 
 //import fr.inria.diversify.util.Log;
+
 import org.apache.log4j.Logger;
 import org.apache.maven.model.Dependency;
 import org.apache.maven.model.Model;
@@ -34,9 +35,12 @@ public class MavenDependencyResolver {
         return fullResolve;
     }
 
+    private HashSet<String> resolved = new HashSet<>();
+
     /**
      * Indicates whether the path must be fully resolved or not. When the POM is fully resolved
      * the dependencies of its dependencies will be also added to the class path recursively.
+     *
      * @param fullResolve True to fully resolve the POM
      */
     public void setFullResolve(boolean fullResolve) {
@@ -46,12 +50,13 @@ public class MavenDependencyResolver {
 
     /**
      * Adds to the class path all dependencies of a project and the project itself
+     *
      * @param pomFile
      * @throws Exception
      */
     public void resolveDependencies(String pomFile) throws Exception {
         MavenProject project = loadProject(new File(pomFile));
-        resolveAllDependencies(project);
+        resolveAllDependencies(project, true);
     }
 
     private MavenProject loadProject(File pomFile) throws IOException, XmlPullParserException {
@@ -64,8 +69,30 @@ public class MavenDependencyResolver {
         return ret;
     }
 
+    private String artifactSignature(Dependency dependency, Properties properties) {
+        StringBuilder sig = new StringBuilder(
+                "mvn:" + resolveName(dependency.getGroupId(), properties) +
+                        ":" + resolveName(dependency.getArtifactId(), properties));
 
-    private void resolveAllDependencies(MavenProject project) throws MalformedURLException {
+        if (dependency.getVersion() != null)
+            sig.append(":" + resolveName(dependency.getVersion(), properties));
+
+        sig.append(":" + resolveName(dependency.getType(), properties));
+        return sig.toString();
+    }
+
+    private File getArtifactPOM(MavenResolver resolver, Dependency dependency,
+                                Properties properties, List<String> urls) {
+        StringBuilder sig = new StringBuilder(
+                "mvn:" + resolveName(dependency.getGroupId(), properties) +
+                        ":" + resolveName(dependency.getArtifactId(), properties));
+        if (dependency.getVersion() != null)
+            sig.append(":" + resolveName(dependency.getVersion(), properties));
+        sig.append(":pom");
+        return resolver.resolve(sig.toString(), urls);
+    }
+
+    private void resolveAllDependencies(MavenProject project, boolean addSelf) throws IOException {
         MavenResolver resolver = new MavenResolver();
         resolver.setBasePath(System.getProperty("user.home") + File.separator + ".m2/repository");
 
@@ -75,21 +102,40 @@ public class MavenDependencyResolver {
         }
         urls.add("http://repo1.maven.org/maven2/");
 
-        List<URL> jarURL =  new ArrayList<>();
+        List<URL> jarURL = new ArrayList<>();
         Properties properties = project.getProperties();
         for (Dependency dependency : project.getDependencies()) {
-            addArtifactToJar(resolver, dependency, properties, jarURL, urls);
+            try {
+                //fullResolveDependency(dependency, project);
+                String sig = artifactSignature(dependency, properties);
+                if (!resolved.contains(sig)) {
+                    addArtifactToJar(resolver, dependency, properties, jarURL, urls);
+                    resolved.add(sig);
+                    /*
+                    try {
+                        MavenProject child = loadProject(getArtifactPOM(resolver, dependency, properties, urls));
+                        resolveAllDependencies(child, false);
+                    } catch (Exception ex) {
+                        logger.warn("Unable get child depenency of " + sig);
+                    }*/
+                }
+            } catch (Exception ex) {
+                logger.warn("Error resolving dependency " + ex.getMessage());
+            }
+
         }
 
-        try {
-            Dependency projectItself = new Dependency();
-            projectItself.setArtifactId(project.getArtifactId());
-            projectItself.setGroupId(project.getGroupId());
-            projectItself.setVersion(project.getVersion());
-            projectItself.setType("jar");
-            addArtifactToJar(resolver, projectItself, properties, jarURL, urls);
-        } catch ( Exception e ){
-            logger.warn("Unable to add the project's jar to the class path");
+        if (addSelf) {
+            try {
+                Dependency projectItself = new Dependency();
+                projectItself.setArtifactId(project.getArtifactId());
+                projectItself.setGroupId(project.getGroupId());
+                projectItself.setVersion(project.getVersion());
+                projectItself.setType("jar");
+                addArtifactToJar(resolver, projectItself, properties, jarURL, urls);
+            } catch (Exception e) {
+                logger.warn("Unable to add the project's jar to the class path");
+            }
         }
 
 
@@ -98,15 +144,34 @@ public class MavenDependencyResolver {
         Thread.currentThread().setContextClassLoader(child);
     }
 
-    private void addArtifactToJar(MavenResolver resolver, Dependency dependency,
+    /*
+    private String getProperty(String k, MavenProject project) {
+        if (k.startsWith("{$"))
+            return project.getProperties().getProperty(k.substring(2, k.length() - 1));
+        return k;
+    }
+
+    private void fullResolveDependency(Dependency dependency, MavenProject project) {
+        dependency.setGroupId(getProperty(dependency.getGroupId(), project));
+        dependency.setArtifactId(getProperty(dependency.getArtifactId(), project));
+        dependency.setVersion(getProperty(dependency.getVersion(), project));
+    }*/
+
+    private File getPom(Dependency dependency) {
+        return null;
+    }
+
+    private File addArtifactToJar(MavenResolver resolver, Dependency dependency,
                                   Properties properties, List<URL> jarURL, List<String> urls) throws MalformedURLException {
-        String artifactId = "mvn:" + resolveName(dependency.getGroupId(), properties) +
-                ":" + resolveName(dependency.getArtifactId(), properties) +
-                ":" + resolveName(dependency.getVersion(), properties) +
-                ":" + resolveName(dependency.getType(), properties);
+        String artifactId = artifactSignature(dependency, properties);
+        logger.info("About to resolve: " + artifactId);
         File cachedFile = resolver.resolve(artifactId, urls);
-        if (cachedFile != null) jarURL.add(cachedFile.toURI().toURL());
-        else logger.warn("Unable to find artifact: " + artifactId);
+        if (cachedFile != null) {
+            URL url = cachedFile.toURI().toURL();
+            jarURL.add(url);
+            logger.info("Dependency resolved: " + url.toString());
+        } else logger.warn("Unable to find artifact: " + artifactId);
+        return cachedFile;
     }
 
 
